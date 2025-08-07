@@ -77,6 +77,7 @@ const upload = () => {
 		setIsProcessing(false);
 		
 		console.log('Feedback data:', data);
+		navigate(`/resume/${uuid}`);
 	}
 
 	const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
