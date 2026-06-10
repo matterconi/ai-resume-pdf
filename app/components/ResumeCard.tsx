@@ -4,8 +4,7 @@ import ScoreCircle from './ScoreCircle'
 import { usePuterStore } from '~/lib/puter'
 
 const ResumeCard = ({ resume }: { resume: Resume }) => {
-  const { id, companyName, jobTitle, feedback, resumePath } = resume;
-  const imageFile = (resume as any).imageFile; // Usa imageFile invece di imagePath
+  const { id, companyName, jobTitle, feedback, imageFileId } = resume;
   
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -13,7 +12,7 @@ const ResumeCard = ({ resume }: { resume: Resume }) => {
   const { fs } = usePuterStore();
 
   useEffect(() => {
-    if (!imageFile) {
+    if (!imageFileId) {
       setLoading(false);
       return;
     }
@@ -23,7 +22,7 @@ const ResumeCard = ({ resume }: { resume: Resume }) => {
       setError(null);
       
       try {
-        const blob = await fs.read(imageFile);
+        const blob = await fs.read(imageFileId);
         
         if (!blob || blob.size === 0) {
           setError('Anteprima non disponibile');
@@ -47,7 +46,7 @@ const ResumeCard = ({ resume }: { resume: Resume }) => {
         URL.revokeObjectURL(resumeUrl);
       }
     };
-  }, [fs, imageFile, id]);
+  }, [fs, imageFileId, id]);
 
   return (
     <Link to={`/resume/${id}`} className='resume-card animate-in fade-in duration-1000'>
@@ -76,7 +75,7 @@ const ResumeCard = ({ resume }: { resume: Resume }) => {
         </div>
       )}
       
-      {(!imageFile || error) && !loading && (
+      {(!imageFileId || error) && !loading && (
         <div className='gradient-border animate-in fade-in duration-1000'>
           <div className='w-full h-[350px] max-sm:h-[200px] flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100'>
             <div className="text-center text-gray-500">
@@ -95,7 +94,7 @@ const ResumeCard = ({ resume }: { resume: Resume }) => {
               </svg>
               <p className="text-sm font-medium">Anteprima documento</p>
               <p className="text-xs mt-1">
-                {!imageFile ? 'Anteprima non disponibile' : error}
+                {!imageFileId ? 'Anteprima non disponibile' : error}
               </p>
             </div>
           </div>

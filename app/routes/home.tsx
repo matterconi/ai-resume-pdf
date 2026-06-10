@@ -4,6 +4,7 @@ import ResumeCard from "~/components/ResumeCard";
 import { usePuterStore } from "~/lib/puter";
 import { Link, useNavigate } from "react-router";
 import { useEffect, useState } from "react";
+import { useAuth } from "~/lib/use-auth";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -13,25 +14,31 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export default function Home() {
-  const { isLoading, auth, kv } = usePuterStore();
+  const { isLoading: puterLoading } = usePuterStore();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [loadingResumes, setLoadingResumes] = useState(true);
 
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!auth.isAuthenticated) {
+    if (!authLoading && !isAuthenticated) {
       navigate("/auth?next=/");
     }
-  }, [auth.isAuthenticated]);
+  }, [isAuthenticated, authLoading, navigate]);
 
   useEffect(() => {
     const fetchResumes = async () => {
       setLoadingResumes(true);
       
       try {
-        const resumesData = (await kv.list("resume:*", true)) as KVItem[];
-        const parsedResumes = resumesData?.map((resume) => JSON.parse(resume.value) as Resume);
+        const res = await fetch('/api/resumes', { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to fetch resumes');
+        const resumesData = await res.json();
+        const parsedResumes = resumesData?.map((resume: any) => ({
+          ...resume,
+          feedback: resume.feedback ? JSON.parse(resume.feedback) : null,
+        })) as Resume[];
         setResumes(parsedResumes || []);
       } catch (error) {
         console.error("Errore nel caricamento dei resume:", error);
@@ -41,8 +48,10 @@ export default function Home() {
       }
     };
 
-    fetchResumes();
-  }, [isLoading, auth.isAuthenticated, kv]);
+    if (isAuthenticated) {
+      fetchResumes();
+    }
+  }, [puterLoading, isAuthenticated]);
 
   return (
     <main className="bg-[url('/images/bg-main.svg')] bg-cover bg-center bg-no-repeat min-h-screen">
@@ -72,11 +81,19 @@ export default function Home() {
           </div>
         )}
 
-        {!loadingResumes && resumes.length > 0 && (
+        {!loadingResumes && resumes.length > 0 && resumes.length < 3 && (
           <div className="flex flex-col items-center justify-center mt-10 gap-4">
             <Link to="/upload" className="btn primary-button w-fit text-xl font-semibold">
               Upload New Resume
             </Link>
+          </div>
+        )}
+
+        {!loadingResumes && resumes.length >= 3 && (
+          <div className="flex flex-col items-center justify-center mt-10 gap-4">
+            <p className="text-amber-600 font-semibold text-lg">
+              You have reached the limit of 3 reviews.
+            </p>
           </div>
         )}
       </section>

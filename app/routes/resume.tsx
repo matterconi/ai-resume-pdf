@@ -1,9 +1,15 @@
 import React, { useEffect } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useLoaderData, redirect } from 'react-router'
 import Details from '~/components/feedback/Details'
 import Summary from '~/components/feedback/Summary'
 import ATS from '~/components/feedback/ATS'
 import { usePuterStore } from '~/lib/puter'
+import { useAuth } from '~/lib/use-auth';
+import { auth } from '~/lib/auth';
+import type { LoaderFunctionArgs } from 'react-router';
+import { db } from '~/lib/db';
+import { resumes } from '~/lib/schema';
+import { eq } from 'drizzle-orm';
 
 export const meta = () => {
   return [
@@ -12,32 +18,51 @@ export const meta = () => {
   ]
 }
 
-const resume = () => {
-  const { auth, isLoading, fs, kv } = usePuterStore();
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) return redirect(`/auth?next=/resume/${params.id || ''}`);
+
+  if (!params.id) {
+    return new Response('Not Found', { status: 404 });
+  }
+
+  const resumeData = await db
+    .select()
+    .from(resumes)
+    .where(eq(resumes.id, params.id))
+    .limit(1);
+
+  if (!resumeData.length || resumeData[0].userId !== session.user.id) {
+    return new Response('Not Found', { status: 404 });
+  }
+
+  const data = resumeData[0];
+  if (data.feedback) {
+    data.feedback = JSON.parse(data.feedback);
+  }
+
+  return data;
+};
+
+  const resume = () => {
+  const { isLoading: puterLoading, fs } = usePuterStore();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const { id } = useParams<{ id: string }>();
+  const loaderData = useLoaderData<typeof loader>() as any;
   const [imageUrl, setImageUrl] = React.useState<string | null>(null);
   const [resumeUrl, setResumeUrl] = React.useState<string | null>(null);
-  const [feedback, setFeedback] = React.useState<Feedback | null>(null);
+  const [feedback, setFeedback] = React.useState<Feedback | null>(loaderData.feedback || null);
   const navigate = useNavigate();
 
   useEffect(() => {
-		if (!isLoading && !auth.isAuthenticated) {
-			// Redirect to home if already authenticated
+		if (!authLoading && !isAuthenticated) {
 			navigate(`/auth?next=/resume/${id}`);
 		}
-	}, [isLoading]);
+	}, [authLoading, isAuthenticated, id, navigate]);
 
   useEffect(() => {
-		const loadResume = async () => {
-			const resumeData = await kv.get(`resume:${id}`);
-
-			if (!resumeData) {
-				console.error('Resume data not found');
-				return;
-			}
-			const parsedData = JSON.parse(resumeData);
-
-			const resumeBlob = await fs.read(parsedData.resumePath);
+		const loadFiles = async () => {
+			const resumeBlob = await fs.read(loaderData.resumeFileId);
 			if (!resumeBlob) {
 				console.error('Resume file not found');
 				return;
@@ -46,19 +71,19 @@ const resume = () => {
 			const resumeUrl = URL.createObjectURL(pdfBlob);
 			setResumeUrl(resumeUrl);
 
-			const imageBlob = await fs.read(parsedData.imageFile);
+			const imageBlob = await fs.read(loaderData.imageFileId);
 			if (!imageBlob) {
 				console.error('Image file not found');
 				return;
 			}
 			const imageUrl = URL.createObjectURL(imageBlob);
 			setImageUrl(imageUrl);
-
-			setFeedback(parsedData.feedback || null);
 		}
 
-		loadResume();
-	}, [id])
+		if (isAuthenticated) {
+			loadFiles();
+		}
+	}, [id, isAuthenticated, fs, loaderData])
 
   return (
 	<main className='!pt-0'>

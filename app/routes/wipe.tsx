@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { usePuterStore } from "~/lib/puter";
+import { useAuth } from "~/lib/use-auth";
 
 const WipeApp = () => {
-    const { auth, isLoading, error, clearError, fs, ai, kv } = usePuterStore();
+    const { isLoading: puterLoading, error, clearError, fs } = usePuterStore();
+    const { isAuthenticated, isLoading: authLoading, user } = useAuth();
     const navigate = useNavigate();
     const [files, setFiles] = useState<FSItem[]>([]);
 
@@ -17,20 +19,20 @@ const WipeApp = () => {
     }, []);
 
     useEffect(() => {
-        if (!isLoading && !auth.isAuthenticated) {
+        if (!authLoading && !isAuthenticated) {
             navigate("/auth?next=/wipe");
         }
-    }, [isLoading]);
+    }, [authLoading, isAuthenticated, navigate]);
 
     const handleDelete = async () => {
         files.forEach(async (file) => {
             await fs.delete(file.path);
         });
-        await kv.flush();
+        await fetch('/api/resumes', { method: 'DELETE', credentials: 'include' });
         loadFiles();
     };
 
-    if (isLoading) {
+    if (authLoading || puterLoading) {
         return <div>Loading...</div>;
     }
 
@@ -40,7 +42,7 @@ const WipeApp = () => {
 
     return (
         <div>
-            Authenticated as: {auth.user?.username}
+            Authenticated as: {user?.name || user?.email}
             <div>Existing files:</div>
             <div className="flex flex-col gap-4">
                 {files.map((file) => (

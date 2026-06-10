@@ -1,18 +1,45 @@
-import React, { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router';
+import React, { useState, useEffect, type FormEvent } from 'react'
+import { useNavigate, useLoaderData, redirect } from 'react-router';
 import FileUploader from '~/components/FileUploader';
 import Navbar from '~/components/Navbar'
-import { convertPdfToImage } from '~/lib/pdf2img';
+import { convertPdfToImage, extractTextFromPdf } from '~/lib/pdf2img';
 import { usePuterStore } from '~/lib/puter';
+import { useAuth } from '~/lib/use-auth';
 import { generateUUID } from '~/lib/utils';
-import { prepareInstructions, AIResponseFormat } from '../../constants';
+import { auth } from '~/lib/auth';
+import type { LoaderFunctionArgs } from 'react-router';
+import { db } from '~/lib/db';
+import { resumes } from '~/lib/schema';
+import { eq, sql } from 'drizzle-orm';
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) return redirect('/auth?next=/upload');
+
+  const countResult = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(resumes)
+    .where(eq(resumes.userId, session.user.id));
+
+  const resumeCount = countResult[0]?.count || 0;
+  return { resumeCount };
+};
 
 const upload = () => {
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [statusMessage, setStatusMessage] = useState('');
 	const [file, setFile] = useState<File | null>(null);
 	const navigate = useNavigate();
-	const { auth, isLoading, fs, ai, kv } = usePuterStore()
+	const { isLoading, fs } = usePuterStore()
+	const { isLoading: isAuthLoading, isAuthenticated } = useAuth();
+	const { resumeCount } = useLoaderData<typeof loader>();
+	const limitReached = resumeCount >= 3;
+
+	useEffect(() => {
+		if (!isAuthLoading && !isAuthenticated) {
+			navigate('/auth?next=/upload', { replace: true });
+		}
+	}, [isAuthLoading, isAuthenticated, navigate]);
 
 	const handleFileSelect = (file: File | null) => {
 		setFile(file);
@@ -36,43 +63,57 @@ const upload = () => {
 		const uploadedImage = await fs.upload([imageFile.file]);
 		if (!uploadedImage) return setStatusMessage('Error: Failed to upload image');
 
-		setStatusMessage('Preparing data...');
-		const uuid = generateUUID();
-		const data = {
-			id: uuid,
-			resumePath: uploadedFile.path,
-			imageFile: uploadedImage.path,
-			companyName,  jobTitle, jobDescription,
-			feedback: ''
-		}
-		await kv.set(`resume:${uuid}`, JSON.stringify(data));
+		setStatusMessage('Extracting text...');
+		const resumeText = await extractTextFromPdf(file);
 
-		setStatusMessage('Analyzing...');
-		const feedback = await ai.feedback(
-			uploadedFile.path,
-			prepareInstructions({
+		setStatusMessage('Analyzing with DeepSeek...');
+		const analyzeRes = await fetch('/api/analyze', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				resumeText,
 				jobTitle,
 				jobDescription,
-				AIResponseFormat
-			})
-		);
+				companyName,
+			}),
+			credentials: 'include',
+		});
 
-		if (!feedback) {
+		if (!analyzeRes.ok) {
 			setIsProcessing(false);
 			return setStatusMessage('Error: Failed to analyze the resume');
 		}
 
-		const feedbackText = typeof feedback.message.content === 'string' ? feedback.message.content : feedback.message.content[0].text;
-
+		const { feedback: feedbackText } = await analyzeRes.json();
 		console.log('Feedback received:', feedbackText);
 		if (!feedbackText) {
 			setIsProcessing(false);
 			return setStatusMessage('Error: No feedback received');
 		}
-		setStatusMessage('Saving feedback...');
+		setStatusMessage('Saving...');
 
-		data.feedback = JSON.parse(feedbackText);
-		await kv.set(`resume:${uuid}`, JSON.stringify(data));
+		const uuid = generateUUID();
+		const data = {
+			id: uuid,
+			resumeFileId: uploadedFile.path,
+			imageFileId: uploadedImage.path,
+			companyName,
+			jobTitle,
+			jobDescription,
+			feedback: JSON.parse(feedbackText),
+		};
+
+		const res = await fetch('/api/resumes', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(data),
+			credentials: 'include',
+		});
+		if (!res.ok) {
+			setIsProcessing(false);
+			return setStatusMessage('Error: Failed to save resume');
+		}
+
 		setStatusMessage('Analysis complete!');
 		setIsProcessing(false);
 		
@@ -109,10 +150,12 @@ const upload = () => {
 					<h2 className='animate-pulse'>{statusMessage}</h2>
 					<img src="/images/resume-scan.gif" alt="Loading..." className='w-full' />
 				</>
+			) : limitReached ? (
+				<h2 className='text-amber-600'>You have reached the limit of 3 reviews.</h2>
 			) : (
 				<h2>Drop your resume for an ATS score and improvement tips</h2>
 			)}
-			{!isProcessing && (
+			{!isProcessing && !limitReached && (
 				<form id="upload-form" onSubmit={handleSubmit} className='flex flex-col gap-4 mt-8'>
 					<div className='form-div'>
 						<label htmlFor="company-name">Company Name</label>

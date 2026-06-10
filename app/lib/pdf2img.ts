@@ -3,6 +3,19 @@ export interface PdfConversionResult {
 	file: File | null;
 	error?: string;
   }
+
+  export async function extractTextFromPdf(file: File | Blob): Promise<string> {
+	const lib = await loadPdfJs();
+	const arrayBuffer = await file.arrayBuffer();
+	const pdf = await lib.getDocument({ data: arrayBuffer }).promise;
+	let text = "";
+	for (let i = 1; i <= pdf.numPages; i++) {
+	  const page = await pdf.getPage(i);
+	  const content = await page.getTextContent();
+	  text += content.items.map((item: any) => item.str).join(" ") + "\n";
+	}
+	return text;
+  }
   
   let pdfjsLib: any = null;
   let isLoading = false;
