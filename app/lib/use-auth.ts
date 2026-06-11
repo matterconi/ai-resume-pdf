@@ -48,8 +48,7 @@ export function useAuth() {
 
   const signOut = useCallback(async () => {
     await authClient.signOut();
-    setUser(null);
-    setIsAuthenticated(false);
+    window.location.href = "/";
   }, []);
 
   return {
